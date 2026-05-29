@@ -220,7 +220,11 @@ class SymbolicRules:
             alerts.append("🌍 Para turistas extranjeros: el documento de identidad es requerido en alojamientos y bodegas.")
 
         # Regla 5: Consulta de emergencia
-        emergencia_keywords = ["perdido", "robo", "accidente", "herido", "emergencia", "peligro"]
+        emergencia_keywords = [
+            "perdido", "robo", "robaron", "robó", "accidente",
+            "herido", "emergencia", "peligro", "auxilio", "ayuda",
+            "asaltaron", "asalto", "perdí", "perdi"
+        ]
         if any(k in query_lower for k in emergencia_keywords):
             alerts.insert(0, "🚨 EMERGENCIA: Policía 110 | Bomberos 119 | Médico 165")
             flags.append("emergencia")
@@ -239,13 +243,14 @@ class ResponseGenerator:
     """
 
     INTENT_PATTERNS = {
-        "lugares":     [r"visitar", r"lugar", r"qu[eé] hay", r"conocer", r"ver", r"turístic"],
+        "lugares":     [r"visitar", r"qu[eé] lugar", r"lugares", r"qu[eé] hay", r"conocer", r"ver en tarija", r"turístic", r"sitios", r"atracci"],
         "ruta":        [r"c[oó]mo llego", r"ruta", r"camino", r"llegar", r"direcci"],
-        "gastronomia": [r"comer", r"restaur", r"comida", r"plato", r"gastronom", r"típic"],
+        "gastronomia": [r"comer", r"restaur", r"comida", r"plato", r"gastronom", r"típic", r"bebida"],
         "seguridad":   [r"segur", r"riesgo", r"peligro", r"zona", r"noche"],
-        "transporte":  [r"taxi", r"micro", r"bus", r"transport", r"llegar"],
-        "eventos":     [r"carnaval", r"feria", r"festival", r"evento", r"fiesta"],
+        "transporte":  [r"taxi", r"micro", r"bus", r"transport", r"terminal"],
+        "eventos":     [r"carnaval", r"feria", r"festival", r"evento", r"fiesta", r"celebraci"],
         "saludo":      [r"^hola", r"^buenos", r"^hi", r"^buenas"],
+        "emergencia":  [r"robar", r"robaron", r"robó", r"accidente", r"perdido", r"auxilio", r"ayuda"],
     }
 
     def detect_intent(self, query: str) -> str:
