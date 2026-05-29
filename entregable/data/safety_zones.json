@@ -1,0 +1,25 @@
+{
+  "zonas_precaución": [
+    {
+      "nombre": "Avenida Las Américas",
+      "nivel": "media",
+      "horario": "noche",
+      "lat": -21.525,
+      "lon": -64.735
+    },
+    {
+      "nombre": "Mercado Central",
+      "nivel": "media",
+      "horario": "noche",
+      "lat": -21.5345,
+      "lon": -64.734
+    },
+    {
+      "nombre": "Barrio Los Chapacos",
+      "nivel": "alta",
+      "horario": "noche",
+      "lat": -21.54,
+      "lon": -64.73
+    }
+  ]
+}
