@@ -1,0 +1,4 @@
+# Dependencias del proyecto
+# Instalar con: pip install -r requirements.txt
+
+streamlit>=1.35.0

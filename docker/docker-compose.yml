@@ -1,0 +1,70 @@
+# ============================================================
+# docker/docker-compose.yml
+# Orquestación completa del proyecto
+# ============================================================
+
+version: "3.9"
+
+services:
+
+  # ── Base de datos ──────────────────────────────────────────
+  db:
+    image: postgis/postgis:15-3.4
+    container_name: turismo_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ../database/schemas/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend ASP.NET Core ───────────────────────────────────
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: turismo_backend
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${APP_ENV}
+      ConnectionStrings__DefaultConnection: ${DATABASE_URL}
+      JwtSettings__SecretKey: ${JWT_SECRET_KEY}
+      InternalApiKey: ${INTERNAL_API_KEY}
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ── Microservicio IA Python ────────────────────────────────
+  ai-service:
+    build:
+      context: ../ai-service
+      dockerfile: Dockerfile
+    container_name: turismo_ai
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV}
+      DATABASE_URL: ${DATABASE_URL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      BACKEND_URL: http://backend:8080
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db_data:
