@@ -1,0 +1,17 @@
+# Dependencias del proyecto - Asistente Turístico Tarija
+# 1. Crear entorno virtual: python -m venv venv
+# 2. Activar entorno:
+#    Windows: venv\Scripts\activate
+#    Linux/Mac: source venv/bin/activate
+# 3. Instalar dependencias: pip install -r requirements.txt
+
+streamlit==1.58.0
+chromadb==1.5.9
+sentence-transformers==5.5.1
+folium==0.20.0
+streamlit-folium==0.27.2
+langdetect==1.0.9
+google-genai==0.3.0   # ← importante: esta es la nueva SDK que usas en el código
+torch==2.12.0
+torchvision==0.27.0
+numpy==2.4.6
