@@ -12,9 +12,7 @@ from chromadb.utils import embedding_functions
 class AdvancedRAGEngine:
     def __init__(self, knowledge_dir: str, collection_name: str = "tarija_tourism"):
         self.knowledge_dir = knowledge_dir
-        self.chroma_client = chromadb.PersistentClient(
-            path=os.path.join(knowledge_dir, "..", "chroma_db")
-        )
+        self.chroma_client = chromadb.Client()
         self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
             model_name="paraphrase-multilingual-MiniLM-L12-v2"
         )
