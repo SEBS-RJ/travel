@@ -20,18 +20,11 @@ class AdvancedRAGEngine:
         persist_dir = "/tmp/chroma_db"
         os.makedirs(persist_dir, exist_ok=True)
 
-        self.chroma_client = chromadb.Client(Settings(
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=persist_dir,
-            is_persistent=True
-        ))
+        self.chroma_client = chromadb.PersistentClient(path=persist_dir)
+
 
         self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
             model_name="paraphrase-multilingual-MiniLM-L12-v2"
-        )
-        self.collection = self.chroma_client.get_or_create_collection(
-            name=collection_name,
-            embedding_function=self.embedding_fn
         )
 
     def _chunk_text(self, text: str, filename: str, max_chars: int = 800) -> List[Dict]:
