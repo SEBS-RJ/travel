@@ -17,11 +17,9 @@ class AdvancedRAGEngine:
         self.knowledge_dir = knowledge_dir
 
         # ✅ Usar /tmp para persistencia (única ruta escribible en Streamlit Cloud)
-        persist_dir = "/tmp/chroma_db"
-        os.makedirs(persist_dir, exist_ok=True)
-
-        self.chroma_client = chromadb.PersistentClient(path=persist_dir)
-
+        self.persist_dir = "/tmp/chroma_db"
+        os.makedirs(self.persist_dir, exist_ok=True)
+        self.chroma_client = chromadb.PersistentClient(path=self.persist_dir)
 
         self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
             model_name="paraphrase-multilingual-MiniLM-L12-v2"
