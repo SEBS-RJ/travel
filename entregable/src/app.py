@@ -308,7 +308,7 @@ if not st.session_state.messages:
     st.markdown("""
     <div class="bubble-assistant">
     ¡Hola! Soy el asistente turístico inteligente de Tarija 🏔️<br><br>
-    Puedo ayudarte en español, inglés o portugués.<br>
+    Puedo ayudarte en.<br>
     • 📍 Lugares turísticos y qué visitar<br>
     • 🍽️ Gastronomía típica tarijeña<br>
     • 🚌 Transporte y cómo moverte<br>
