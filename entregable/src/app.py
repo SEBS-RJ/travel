@@ -149,7 +149,6 @@ if "GEMINI_API_KEY" in st.secrets and st.secrets["GEMINI_API_KEY"]:
         try:
             GEMINI_CLIENT = genai.Client(api_key=api_key)
             USE_GEMINI = True
-            st.toast("✅ Asistente avanzado (Gemini 2.5 Flash) activado.", icon="🚀")
         except Exception as e:
             st.warning(f"⚠️ Error configurando Gemini: {e}")
     else:
@@ -263,9 +262,9 @@ if "pending_query" not in st.session_state:
 with st.sidebar:
     col1, col2 = st.columns(2)
     with col1:
-        st.image("https://flagpedia.net/data/flags/icon/72x54/bo.png", width=60)
+        st.image("entregable/assets/bandera_bolivia.png", width=60)
     with col2:
-        st.markdown("<h1 style='text-align: center; font-size: 2rem;'>🍇</h1>", unsafe_allow_html=True)
+        st.image("entregable/assets/bandera_tarija.png", width=60)
     st.title("🏔️ Asistente Turístico")
     st.caption("Tarija, Bolivia — IA Híbrida (Gemini + RAG) + Multilingüe")
 
