@@ -1,7 +1,7 @@
 # ============================================================
 # src/app.py - Asistente Turístico Tarija
 # Fase 3: Gemini 2.5 Flash + Fallback a RAG local
-# Fase 4 parcial: Soporte multilingüe (español, inglés, portugués)
+# Fase 4 parcial: Soporte multilingüe (dejamos que Gemini detecte el idioma)
 # Responsive con botones simétricos (mismo ancho)
 # ============================================================
 
@@ -130,7 +130,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── Función para detectar idioma ──────────────────────────────
+# ── Función para detectar idioma solo para metadatos (no influye en respuesta) ──
 def detect_language(text: str) -> str:
     try:
         lang = detect(text)
@@ -166,7 +166,7 @@ def load_rag():
 
 rag = load_rag()
 
-# ── Funciones para Gemini con reintentos (con soporte multilingüe) ──
+# ── Funciones para Gemini con reintentos (multilingüe natural) ──
 
 def call_gemini_with_retry(prompt: str, max_retries: int = 3) -> str:
     if not USE_GEMINI or GEMINI_CLIENT is None:
@@ -187,28 +187,36 @@ def call_gemini_with_retry(prompt: str, max_retries: int = 3) -> str:
     raise Exception("No se pudo obtener respuesta de Gemini")
 
 def generate_response_with_fallback(query: str, context_chunks: list, user_context: dict) -> tuple:
-    user_lang = detect_language(query)
-    lang_names = {'es': 'español', 'en': 'inglés', 'pt': 'portugués', 'fr': 'francés', 'de': 'alemán'}
-    lang_name = lang_names.get(user_lang, 'español')
+    """Plan A -> Plan B -> Plan C. Retorna (respuesta, fuente, idioma_detectado_para_meta)."""
+    # Construir contexto
     context_text = "\n".join([chunk["text"][:800] for chunk in context_chunks[:5]])
+    
+    # Prompt sin forzar un idioma específico; Gemini lo detectará automáticamente
     prompt = f"""
 Eres un asistente turístico experto en Tarija, Bolivia.
-El usuario ha hecho una pregunta en {lang_name}. **Debes responder en {lang_name} exclusivamente.**
+**Debes responder en el mismo idioma que la pregunta del usuario.**
 Usa el siguiente contexto para responder de forma amable, concisa y útil.
 Si la respuesta no está en el contexto, di que no lo sabes, pero intenta ayudar con lo que sabes.
 No inventes información.
 
-Contexto (en español, pero responde en {lang_name}):
+Contexto (en español, pero responde en el idioma de la pregunta):
 {context_text}
 
 Pregunta del usuario: {query}
 
-Respuesta (en {lang_name}):
+Respuesta (en el mismo idioma que la pregunta):
 """
+    # PLAN A: Gemini
     try:
         answer = call_gemini_with_retry(prompt)
-        return answer, "gemini", user_lang
+        # Detectar el idioma de la respuesta solo para los metadatos (puede fallar, no importa)
+        try:
+            meta_lang = detect_language(answer)
+        except:
+            meta_lang = 'auto'
+        return answer, "gemini", meta_lang
     except Exception as e:
+        # PLAN B: RAG local (solo español)
         try:
             st.warning(f"⚠️ Modo avanzado no disponible. Usando motor local (solo español). Error: {str(e)[:80]}")
             result = rag.ask(
@@ -219,16 +227,21 @@ Respuesta (en {lang_name}):
                 extranjero=user_context.get("extranjero", False)
             )
             answer = result["answer"]
-            if user_lang != 'es':
-                answer = f"[El modo local solo responde en español. Tu pregunta estaba en {lang_name}]\n\n{answer}"
-            return answer, "rag", user_lang
+            # Añadir aviso si el usuario parece no hablar español (detectado de la query)
+            try:
+                query_lang = detect_language(query)
+                if query_lang != 'es':
+                    answer = f"[El modo local solo responde en español. Tu pregunta parecía estar en {query_lang}]\n\n{answer}"
+            except:
+                pass
+            return answer, "rag", 'es'
         except Exception:
             default_msgs = {
                 'es': "Lo siento, estoy teniendo problemas técnicos. Por favor, intenta de nuevo en unos minutos. Mientras tanto, puedes consultar la Secretaría de Turismo de Tarija.",
                 'en': "I'm sorry, I'm having technical issues. Please try again in a few minutes. Meanwhile, you can check the Tarija Tourism Office.",
                 'pt': "Desculpe, estou tendo problemas técnicos. Por favor, tente novamente em alguns minutos. Enquanto isso, você pode consultar a Secretaria de Turismo de Tarija."
             }
-            return default_msgs.get(user_lang, default_msgs['es']), "default", user_lang
+            return default_msgs.get('es'), "default", 'es'
 
 # ── Estado de la sesión ───────────────────────────────────────
 
@@ -347,7 +360,6 @@ if st.session_state.route_coords:
 st.divider()
 st.caption("Consultas rápidas:")
 
-# Usamos st.columns(5) - ahora con CSS los botones tendrán el mismo ancho
 cols = st.columns(5)
 quick = [
     "¿Qué visitar en Tarija?",
@@ -371,7 +383,7 @@ with st.form("chat_form", clear_on_submit=True):
 if submitted and user_input.strip():
     st.session_state.pending_query = user_input.strip()
 
-# ── Procesamiento de la consulta (sin cambios) ────────────────
+# ── Procesamiento de la consulta ───────────────────────────────
 
 if st.session_state.pending_query and not st.session_state.processing:
     st.session_state.processing = True
