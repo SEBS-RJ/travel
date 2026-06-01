@@ -333,6 +333,15 @@ for msg in st.session_state.messages:
                 unsafe_allow_html=True
             )
 
+# ── Campo de entrada del usuario (chat input) ─────────────────
+user_query = st.chat_input("Escribe tu consulta aquí...", key="main_chat_input")
+if user_query and not st.session_state.processing:
+    # Agregar mensaje del usuario al historial
+    st.session_state.messages.append({"role": "user", "content": user_query})
+    # Guardar la consulta para procesar
+    st.session_state.pending_query = user_query
+    st.session_state.processing = True
+    st.rerun()
 # ── Contenedor para la animación (se mostrará durante el procesamiento) ──
 typing_container = st.empty()
 
