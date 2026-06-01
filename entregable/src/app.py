@@ -149,7 +149,6 @@ if "GEMINI_API_KEY" in st.secrets and st.secrets["GEMINI_API_KEY"]:
         try:
             GEMINI_CLIENT = genai.Client(api_key=api_key)
             USE_GEMINI = True
-            st.toast("✅ Asistente avanzado (Gemini 2.5 Flash) activado.", icon="🚀")
         except Exception as e:
             st.warning(f"⚠️ Error configurando Gemini: {e}")
     else:
@@ -263,9 +262,9 @@ if "pending_query" not in st.session_state:
 with st.sidebar:
     col1, col2 = st.columns(2)
     with col1:
-        st.image("https://flagpedia.net/data/flags/icon/72x54/bo.png", width=60)
+        st.image("entregable\assets\bandera_bolivia.png", width=60)
     with col2:
-        st.markdown("<h1 style='text-align: center; font-size: 2rem;'>🍇</h1>", unsafe_allow_html=True)
+        st.image("entregable\assets\bandera_tarija.png", width=60)
     st.title("🏔️ Asistente Turístico")
     st.caption("Tarija, Bolivia — IA Híbrida (Gemini + RAG) + Multilingüe")
 
@@ -346,50 +345,6 @@ typing_container = st.empty()
 
 # ── Mostrar mapa si hay coordenadas guardadas (responsivo) ────
 
-if st.session_state.route_coords:
-    origin_coords, dest_coords, origin_name, dest_name = st.session_state.route_coords
-    m = folium.Map(location=origin_coords, zoom_start=14)
-    folium.Marker(origin_coords, popup=f"Origen: {origin_name}", icon=folium.Icon(color="green", icon="play")).add_to(m)
-    folium.Marker(dest_coords, popup=f"Destino: {dest_name}", icon=folium.Icon(color="red", icon="stop")).add_to(m)
-    folium.PolyLine([origin_coords, dest_coords], color="blue", weight=4, opacity=0.7).add_to(m)
-    st.markdown("### 🗺️ Mapa de la última ruta")
-    st_folium(m, width=700, height=500, key="route_map", use_container_width=True)
-
-# ── Input y consultas rápidas (botones simétricos) ────────────
-
-st.divider()
-st.caption("Consultas rápidas:")
-
-cols = st.columns(5)
-quick = [
-    "¿Qué visitar en Tarija?",
-    "Comida típica",
-    "¿Es seguro el centro de noche?",
-    "¿Cuándo es el Carnaval?",
-    "¿Cómo llegar de la plaza a una bodega?"
-]
-for i, (col, text) in enumerate(zip(cols, quick)):
-    if col.button(text, key=f"quick_{i}", use_container_width=True):
-        st.session_state.pending_query = text
-
-with st.form("chat_form", clear_on_submit=True):
-    user_input = st.text_input(
-        "Escribe tu consulta:",
-        placeholder="Ej: What places can I visit in Tarija?",
-        label_visibility="collapsed"
-    )
-    submitted = st.form_submit_button("Enviar ➤", use_container_width=True, type="primary")
-
-if submitted and user_input.strip():
-    st.session_state.pending_query = user_input.strip()
-
-# ── Procesamiento de la consulta ───────────────────────────────
-
-if st.session_state.pending_query and not st.session_state.processing:
-    st.session_state.processing = True
-    st.session_state.messages.append({"role": "user", "content": st.session_state.pending_query})
-    st.rerun()
-
 if st.session_state.processing:
     query = st.session_state.pending_query
     st.session_state.pending_query = None
@@ -398,12 +353,17 @@ if st.session_state.processing:
         st.session_state.processing = False
         st.rerun()
 
+    # Mostrar animación
     typing_container.markdown(
         '<div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>',
         unsafe_allow_html=True
     )
 
-    route_keywords = ["cómo llegar", "ruta a", "distancia", "ir de", "hasta", "desde", "hacia", "llegar a"]
+    # --- LIMPIAR MAPA POR DEFECTO (a menos que sea ruta válida) ---
+    st.session_state.route_coords = None
+
+    # Detectar si es consulta de ruta
+    route_keywords = ["cómo llegar","como llegar", "ruta a", "distancia", "ir de", "hasta", "desde", "hacia", "llegar a"]
     is_route = any(kw in query.lower() for kw in route_keywords)
 
     t0 = time.time()
@@ -420,7 +380,7 @@ if st.session_state.processing:
                 "alerts": [],
                 "sources": []
             }
-            st.session_state.route_coords = None
+            # No se guardan coordenadas porque route es None
         else:
             st.session_state.route_coords = (
                 route["origin_coords"], route["destination_coords"],
@@ -436,6 +396,7 @@ if st.session_state.processing:
             }
         source = "routing_agent"
     else:
+        # Consulta general → usar fallback multilingüe
         context_results = rag.engine.search(query, top_k=5)
         user_context = {
             "hora": hora,
@@ -453,10 +414,11 @@ if st.session_state.processing:
             "alerts": [],
             "sources": [f"Generado por {source}"]
         }
+        # Añadir alertas de seguridad
         safety = SafetyAgent()
         alerts_safety = safety.check_zone(query, hora=hora)
         result["alerts"].extend(alerts_safety)
-        st.session_state.route_coords = None
+        # st.session_state.route_coords ya se puso a None al inicio
 
     elapsed = round((time.time() - t0) * 1000, 1)
 
