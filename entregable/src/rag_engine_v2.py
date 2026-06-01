@@ -1,4 +1,3 @@
-# src/rag_engine_v2.py
 import os
 import glob
 import json
@@ -7,12 +6,26 @@ from typing import List, Dict, Any
 
 import chromadb
 from chromadb.utils import embedding_functions
-
+from chromadb.config import Settings
 
 class AdvancedRAGEngine:
+    """
+    Motor RAG con ChromaDB y persistencia en /tmp (para entornos de solo lectura como Streamlit Cloud).
+    """
+
     def __init__(self, knowledge_dir: str, collection_name: str = "tarija_tourism"):
         self.knowledge_dir = knowledge_dir
-        self.chroma_client = chromadb.Client()
+
+        # ✅ Usar /tmp para persistencia (única ruta escribible en Streamlit Cloud)
+        persist_dir = "/tmp/chroma_db"
+        os.makedirs(persist_dir, exist_ok=True)
+
+        self.chroma_client = chromadb.Client(Settings(
+            chroma_db_impl="duckdb+parquet",
+            persist_directory=persist_dir,
+            is_persistent=True
+        ))
+
         self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
             model_name="paraphrase-multilingual-MiniLM-L12-v2"
         )
@@ -21,7 +34,8 @@ class AdvancedRAGEngine:
             embedding_function=self.embedding_fn
         )
 
-    def _chunk_text(self, text: str, filename: str, max_chars: int = 800):
+    def _chunk_text(self, text: str, filename: str, max_chars: int = 800) -> List[Dict]:
+        """Divide el texto en fragmentos de aproximadamente max_chars palabras."""
         words = text.split()
         chunks = []
         for i in range(0, len(words), max_chars):
@@ -34,7 +48,16 @@ class AdvancedRAGEngine:
             })
         return chunks
 
-    def load_documents(self):
+    def load_documents(self) -> int:
+        """
+        Carga los documentos solo si la colección está vacía.
+        Retorna el número de fragmentos cargados.
+        """
+        # ✅ Evita recargar si ya hay datos
+        if self.collection.count() > 0:
+            print(f"Colección '{self.collection.name}' ya tiene {self.collection.count()} documentos. No se recargan.")
+            return self.collection.count()
+
         txt_files = glob.glob(os.path.join(self.knowledge_dir, "*.txt"))
         all_chunks = []
         for filepath in txt_files:
@@ -42,16 +65,21 @@ class AdvancedRAGEngine:
             with open(filepath, 'r', encoding='utf-8') as f:
                 text = f.read()
             all_chunks.extend(self._chunk_text(text, filename))
-        for chunk in all_chunks:
+
+        # Insertar en lotes para mejor rendimiento
+        batch_size = 100
+        for i in range(0, len(all_chunks), batch_size):
+            batch = all_chunks[i:i+batch_size]
             self.collection.upsert(
-                ids=[chunk["id"]],
-                documents=[chunk["text"]],
-                metadatas=[chunk["metadata"]]
+                ids=[chunk["id"] for chunk in batch],
+                documents=[chunk["text"] for chunk in batch],
+                metadatas=[chunk["metadata"] for chunk in batch]
             )
         print(f"Cargados {len(all_chunks)} fragmentos en ChromaDB.")
         return len(all_chunks)
 
     def search(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+        """Busca los fragmentos más relevantes para la consulta."""
         results = self.collection.query(
             query_texts=[query],
             n_results=top_k,
@@ -73,6 +101,7 @@ class AdvancedRAGEngine:
         return json.dumps(results, ensure_ascii=False)
 
     def classify_intent(self, query: str) -> str:
+        """Clasifica la intención de la consulta mediante palabras clave."""
         keywords = {
             "saludo": ["hola", "buenos días", "buenas tardes", "qué tal", "saludos", "hey", "buenas"],
             "lugares": ["lugar", "visitar", "turístico", "qué hacer", "sitio", "parque", "museo", "mirador", "plaza", "atractivo", "conocer", "excursión"],
@@ -92,14 +121,16 @@ class AdvancedRAGEngine:
     def apply_rules(self, query: str, intent: str, hora: int = 12,
                     presupuesto: float = None, tiempo_min: int = None,
                     es_fin_de_semana: bool = None) -> Dict[str, bool]:
+        """Aplica reglas simbólicas basadas en contexto y consulta."""
         flags = {}
         q = query.lower()
+
         # Reglas por palabras clave
-        if "poco dinero" in q or "económico" in q or "barato" in q or "presupuesto bajo" in q:
+        if any(k in q for k in ["poco dinero", "económico", "barato", "presupuesto bajo"]):
             flags["filtrar_gratuitos"] = True
-        if "poco tiempo" in q or "2 horas" in q or "rápido" in q or "apuro" in q:
+        if any(k in q for k in ["poco tiempo", "2 horas", "rápido", "apuro"]):
             flags["itinerario_corto"] = True
-        if "noche" in q or "nocturno" in q or "de noche" in q:
+        if "noche" in q or "nocturno" in q:
             flags["seguridad_nocturna"] = True
         if "extranjero" in q or "turista extranjero" in q:
             flags["incluir_contexto_cultural"] = True
@@ -108,7 +139,7 @@ class AdvancedRAGEngine:
         if "con niños" in q or "familia" in q:
             flags["familiar"] = True
 
-        # Reglas por parámetros de contexto
+        # Reglas por parámetros
         if presupuesto is not None and presupuesto < 50:
             flags["filtrar_gratuitos"] = True
         if tiempo_min is not None and tiempo_min < 60:
@@ -121,12 +152,16 @@ class AdvancedRAGEngine:
         return flags
 
     def generate_response(self, query: str, results: List[Dict], intent: str, flags: Dict) -> str:
+        """Genera la respuesta final combinando resultados y reglas."""
         if flags.get("emergencia"):
             return "🚨 EMERGENCIA: Policía 110 | Bomberos 119 | Médico 165. Diríjase a un lugar seguro y pida ayuda."
+
         if not results:
             return "No encontré información específica. Te recomiendo consultar la Secretaría de Turismo de Tarija."
+
         top_doc = results[0]["text"][:300]
         fuentes = set(r["source"] for r in results)
+
         prefijo = ""
         if intent == "saludo":
             prefijo = "¡Hola! Soy el asistente turístico de Tarija 🏔️\n"
@@ -140,6 +175,7 @@ class AdvancedRAGEngine:
             prefijo = "Para moverte por la ciudad:\n"
         elif intent == "alojamiento":
             prefijo = "Opciones de hospedaje en Tarija:\n"
+
         if flags.get("filtrar_gratuitos"):
             prefijo += "💰 Con presupuesto bajo: "
         if flags.get("itinerario_corto"):
@@ -148,4 +184,5 @@ class AdvancedRAGEngine:
             prefijo += "👨‍👩‍👧‍👦 Opciones para toda la familia: "
         if flags.get("es_fin_de_semana"):
             prefijo += "🎉 Durante el fin de semana hay más actividades. "
+
         return f"{prefijo}{top_doc}\n\n📚 Fuente: {', '.join(fuentes)}"

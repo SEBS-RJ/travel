@@ -1,10 +1,3 @@
-# ============================================================
-# src/app.py - Asistente Turístico Tarija
-# Fase 3: Gemini 2.5 Flash + Fallback a RAG local
-# Fase 4 parcial: Soporte multilingüe (dejamos que Gemini detecte el idioma)
-# Responsive con botones simétricos (mismo ancho)
-# ============================================================
-
 import sys
 import time
 from pathlib import Path

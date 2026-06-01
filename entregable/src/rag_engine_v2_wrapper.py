@@ -1,55 +1,57 @@
-# src/rag_engine_v2_wrapper.py
-import json
 from pathlib import Path
-from datetime import datetime
-from rag_engine_v2 import AdvancedRAGEngine
-
+from .rag_engine_v2 import AdvancedRAGEngine
 
 class TurismoRAG_v2:
-    def __init__(self, knowledge_dir):
+    """
+    Wrapper para que app.py pueda usar AdvancedRAGEngine de forma compatible.
+    Expone un atributo `retriever` con `n_docs` (número de fragmentos indexados).
+    """
+
+    def __init__(self, knowledge_dir: str):
+        self.knowledge_dir = knowledge_dir
         self.engine = AdvancedRAGEngine(knowledge_dir)
-        self.engine.load_documents()
-        # Simular el atributo retriever que espera app.py (para mostrar métricas)
+        # Cargar documentos (solo si no existen)
+        n_docs = self.engine.load_documents()
+        # Crear un objeto simulador de retriever para mantener compatibilidad con app.py
         class DummyRetriever:
-            def __init__(self, n_docs):
-                self.n_docs = n_docs
-                self.idf = {}
-        self.retriever = DummyRetriever(len(self.engine.collection.get()['ids']))
+            def __init__(self, n):
+                self.n_docs = n
+        self.retriever = DummyRetriever(n_docs)
 
-    def ask(self, query, hora=12, presupuesto_bob=None,
-            tiempo_disponible_min=None, extranjero=False):
+    def ask(self, query: str, hora: int = 12, presupuesto_bob: float = None,
+            tiempo_disponible_min: int = None, extranjero: bool = False) -> dict:
+        """
+        Interfaz unificada para responder consultas.
+        """
+        # 1. Recuperar fragmentos
+        results = self.engine.search(query, top_k=3)
+        # 2. Clasificar intención
         intent = self.engine.classify_intent(query)
-
-        # Aplicar reglas con contexto
+        # 3. Aplicar reglas simbólicas
         flags = self.engine.apply_rules(
-            query, intent,
-            hora=hora,
-            presupuesto=presupuesto_bob,
-            tiempo_min=tiempo_disponible_min,
-            es_fin_de_semana=(datetime.now().weekday() >= 5)
+            query, intent, hora, presupuesto_bob, tiempo_disponible_min
         )
-
-        # Sobrescribir flags con parámetros de la interfaz (compatibilidad)
-        if presupuesto_bob is not None and presupuesto_bob < 100:
-            flags["filtrar_gratuitos"] = True
-        if tiempo_disponible_min is not None and tiempo_disponible_min < 60:
-            flags["itinerario_corto"] = True
-        if extranjero:
-            flags["incluir_contexto_cultural"] = True
-        if hora < 6 or hora > 20:
-            flags["seguridad_nocturna"] = True
-
-        # Búsqueda con caché (resultados en JSON)
-        results_json = self.engine.search_with_cache(query, top_k=3)
-        results = json.loads(results_json)
-
+        # 4. Generar respuesta
         answer = self.engine.generate_response(query, results, intent, flags)
 
         return {
             "answer": answer,
             "intent": intent,
-            "confidence": results[0]["similarity"] if results else 0.0,
-            "n_chunks_retrieved": len(results),
-            "alerts": [w for w in flags if flags[w]],
-            "sources": list(set(r["source"] for r in results)) if results else []
+            "confidence": 0.8 if results else 0.3,
+            "sources": list({r["source"] for r in results}),
+            "n_chunks": len(results),
+            "alerts": self._get_alerts_from_flags(flags),
         }
+
+    def _get_alerts_from_flags(self, flags: dict) -> list:
+        """Convierte flags en mensajes de alerta legibles."""
+        alerts = []
+        if flags.get("seguridad_nocturna"):
+            alerts.append("⚠️ Horario nocturno: prefiere taxi de placa amarilla y evita zonas periféricas.")
+        if flags.get("filtrar_gratuitos"):
+            alerts.append("💰 Con presupuesto bajo: hay opciones gratuitas como plazas y miradores.")
+        if flags.get("itinerario_corto"):
+            alerts.append("⏱️ Poco tiempo: recomendamos lugares céntricos y cercanos.")
+        if flags.get("incluir_contexto_cultural"):
+            alerts.append("🌍 Para turistas extranjeros: recuerda llevar tu documento de identidad.")
+        return alerts
