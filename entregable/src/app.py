@@ -1,7 +1,8 @@
 # ============================================================
 # src/app.py - Asistente Turístico Tarija
-# Con animación de escritura (burbuja con tres puntos)
-# Mapa persistente, RAG semántico, Routing Agent, Safety Agent
+# Fase 3: Gemini 2.5 Flash + Fallback a RAG local
+# Fase 4 parcial: Soporte multilingüe (español, inglés, portugués)
+# Responsive con botones simétricos (mismo ancho)
 # ============================================================
 
 import sys
@@ -11,6 +12,14 @@ from pathlib import Path
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
+from langdetect import detect, LangDetectException
+
+# SDK de Gemini
+try:
+    from google import genai
+    USE_GEMINI_SDK = True
+except ImportError:
+    USE_GEMINI_SDK = False
 
 sys.path.insert(0, str(Path(__file__).parent))
 from rag_engine_v2_wrapper import TurismoRAG_v2 as TurismoRAG
@@ -23,14 +32,14 @@ st.set_page_config(
     page_title="Asistente Turístico Tarija",
     page_icon="🏔️",
     layout="centered",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
-# ── Estilos CSS (incluye animación de tres puntos) ────────────
+# ── Estilos CSS (original + mejoras responsive + botones simétricos) ──
 
 st.markdown("""
 <style>
-/* Burbujas de chat */
+/* Estilos originales de burbujas y animación */
 .bubble-user {
     background: #2563EB;
     color: white;
@@ -62,8 +71,6 @@ st.markdown("""
     margin: 4px 0;
     color: #92400E;
 }
-
-/* Indicador de escritura (tres puntos con onda) */
 .typing-indicator {
     display: flex;
     align-items: center;
@@ -90,10 +97,67 @@ st.markdown("""
     0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
     30% { transform: translateY(-10px); opacity: 1; }
 }
+
+/* Mejoras responsive y botones simétricos */
+@media (max-width: 768px) {
+    /* Hacer que las 5 columnas tengan el mismo ancho */
+    div[data-testid="column"] {
+        flex: 1 1 90px !important;   /* base igual para todas */
+        min-width: 80px !important;
+        max-width: 120px !important;
+        text-align: center;
+    }
+    /* Botones ocupan toda la columna y el texto se ajusta */
+    .stButton button {
+        width: 100% !important;
+        white-space: normal !important;
+        word-break: break-word;
+        font-size: 11px !important;
+        padding: 6px 4px !important;
+    }
+    /* Mapa más pequeño */
+    iframe {
+        height: 300px !important;
+    }
+    /* Ajustar márgenes de burbujas en móvil */
+    .bubble-user {
+        margin-left: 10% !important;
+    }
+    .bubble-assistant {
+        margin-right: 10% !important;
+    }
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ── Cargar motor RAG (cache) ──────────────────────────────────
+# ── Función para detectar idioma ──────────────────────────────
+def detect_language(text: str) -> str:
+    try:
+        lang = detect(text)
+        return lang
+    except LangDetectException:
+        return 'es'
+
+# ── Configuración de Gemini (Plan A) ──────────────────────────
+
+GEMINI_CLIENT = None
+USE_GEMINI = False
+
+if "GEMINI_API_KEY" in st.secrets and st.secrets["GEMINI_API_KEY"]:
+    api_key = st.secrets["GEMINI_API_KEY"]
+    if USE_GEMINI_SDK:
+        try:
+            GEMINI_CLIENT = genai.Client(api_key=api_key)
+            USE_GEMINI = True
+            st.toast("✅ Asistente avanzado (Gemini 2.5 Flash) activado.", icon="🚀")
+        except Exception as e:
+            st.warning(f"⚠️ Error configurando Gemini: {e}")
+    else:
+        st.warning("⚠️ SDK google-genai no instalado. Ejecuta: pip install google-genai")
+else:
+    st.info("🔑 Sin API key de Gemini. El asistente usará modo local (RAG).")
+
+# ── Cargar motor RAG (Plan B) ─────────────────────────────────
 
 @st.cache_resource(show_spinner="Cargando base de conocimiento turístico...")
 def load_rag():
@@ -101,6 +165,70 @@ def load_rag():
     return TurismoRAG(str(knowledge_dir))
 
 rag = load_rag()
+
+# ── Funciones para Gemini con reintentos (con soporte multilingüe) ──
+
+def call_gemini_with_retry(prompt: str, max_retries: int = 3) -> str:
+    if not USE_GEMINI or GEMINI_CLIENT is None:
+        raise Exception("Gemini no disponible")
+    for attempt in range(max_retries):
+        try:
+            response = GEMINI_CLIENT.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt
+            )
+            return response.text
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait = 2 ** attempt
+                time.sleep(wait)
+            else:
+                raise e
+    raise Exception("No se pudo obtener respuesta de Gemini")
+
+def generate_response_with_fallback(query: str, context_chunks: list, user_context: dict) -> tuple:
+    user_lang = detect_language(query)
+    lang_names = {'es': 'español', 'en': 'inglés', 'pt': 'portugués', 'fr': 'francés', 'de': 'alemán'}
+    lang_name = lang_names.get(user_lang, 'español')
+    context_text = "\n".join([chunk["text"][:800] for chunk in context_chunks[:5]])
+    prompt = f"""
+Eres un asistente turístico experto en Tarija, Bolivia.
+El usuario ha hecho una pregunta en {lang_name}. **Debes responder en {lang_name} exclusivamente.**
+Usa el siguiente contexto para responder de forma amable, concisa y útil.
+Si la respuesta no está en el contexto, di que no lo sabes, pero intenta ayudar con lo que sabes.
+No inventes información.
+
+Contexto (en español, pero responde en {lang_name}):
+{context_text}
+
+Pregunta del usuario: {query}
+
+Respuesta (en {lang_name}):
+"""
+    try:
+        answer = call_gemini_with_retry(prompt)
+        return answer, "gemini", user_lang
+    except Exception as e:
+        try:
+            st.warning(f"⚠️ Modo avanzado no disponible. Usando motor local (solo español). Error: {str(e)[:80]}")
+            result = rag.ask(
+                query=query,
+                hora=user_context.get("hora", 12),
+                presupuesto_bob=user_context.get("presupuesto"),
+                tiempo_disponible_min=user_context.get("tiempo_min"),
+                extranjero=user_context.get("extranjero", False)
+            )
+            answer = result["answer"]
+            if user_lang != 'es':
+                answer = f"[El modo local solo responde en español. Tu pregunta estaba en {lang_name}]\n\n{answer}"
+            return answer, "rag", user_lang
+        except Exception:
+            default_msgs = {
+                'es': "Lo siento, estoy teniendo problemas técnicos. Por favor, intenta de nuevo en unos minutos. Mientras tanto, puedes consultar la Secretaría de Turismo de Tarija.",
+                'en': "I'm sorry, I'm having technical issues. Please try again in a few minutes. Meanwhile, you can check the Tarija Tourism Office.",
+                'pt': "Desculpe, estou tendo problemas técnicos. Por favor, tente novamente em alguns minutos. Enquanto isso, você pode consultar a Secretaria de Turismo de Tarija."
+            }
+            return default_msgs.get(user_lang, default_msgs['es']), "default", user_lang
 
 # ── Estado de la sesión ───────────────────────────────────────
 
@@ -120,9 +248,13 @@ if "pending_query" not in st.session_state:
 # ── Sidebar (contexto) ────────────────────────────────────────
 
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/b/b3/Flag_of_Bolivia.svg/200px-Flag_of_Bolivia.svg.png", width=80)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.image("https://flagpedia.net/data/flags/icon/72x54/bo.png", width=60)
+    with col2:
+        st.markdown("<h1 style='text-align: center; font-size: 2rem;'>🍇</h1>", unsafe_allow_html=True)
     st.title("🏔️ Asistente Turístico")
-    st.caption("Tarija, Bolivia — IA Híbrida (RAG + Reglas)")
+    st.caption("Tarija, Bolivia — IA Híbrida (Gemini + RAG) + Multilingüe")
 
     st.divider()
     st.subheader("Tu contexto de viaje")
@@ -145,7 +277,7 @@ with st.sidebar:
 
     st.divider()
     st.caption(f"Chunks indexados: {rag.retriever.n_docs}")
-    st.caption("Paradigma: RAG semántico + Reglas")
+    st.caption("Plan A: Gemini | Plan B: RAG local | Plan C: Respuesta por defecto")
     if st.button("🗑️ Limpiar conversación", use_container_width=True):
         st.session_state.messages = []
         st.session_state.total_queries = 0
@@ -158,13 +290,13 @@ with st.sidebar:
 # ── Header principal ──────────────────────────────────────────
 
 st.title("🏔️ Asistente Turístico de Tarija")
-st.caption("Sistema RAG con reglas simbólicas + Routing Agent + Safety Agent")
+st.caption("Sistema híbrido: Gemini 2.5 Flash + RAG semántico + Routing Agent + Safety Agent + Multilingüe")
 
 if not st.session_state.messages:
     st.markdown("""
     <div class="bubble-assistant">
     ¡Hola! Soy el asistente turístico inteligente de Tarija 🏔️<br><br>
-    Puedo ayudarte con:<br>
+    Puedo ayudarte en español, inglés o portugués.<br>
     • 📍 Lugares turísticos y qué visitar<br>
     • 🍽️ Gastronomía típica tarijeña<br>
     • 🚌 Transporte y cómo moverte<br>
@@ -190,39 +322,32 @@ for msg in st.session_state.messages:
                 f'<div class="meta">🎯 Intent: {m["intent"]} &nbsp;|&nbsp; '
                 f'📊 Confianza: {m["confidence"]:.4f} &nbsp;|&nbsp; '
                 f'🧩 Chunks: {m["n_chunks"]} &nbsp;|&nbsp; '
-                f'⚡ {m["elapsed_ms"]}ms</div>',
+                f'⚡ {m["elapsed_ms"]}ms &nbsp;|&nbsp; '
+                f'🤖 Fuente: {m.get("source", "rag")} &nbsp;|&nbsp; '
+                f'🌍 Idioma: {m.get("language", "es")}</div>',
                 unsafe_allow_html=True
             )
 
-# ── Contenedor para la animación de escritura (posición correcta) ──
+# ── Contenedor para la animación (se mostrará durante el procesamiento) ──
 typing_container = st.empty()
 
-# ── Mostrar mapa si hay coordenadas guardadas ─────────────────
+# ── Mostrar mapa si hay coordenadas guardadas (responsivo) ────
 
 if st.session_state.route_coords:
     origin_coords, dest_coords, origin_name, dest_name = st.session_state.route_coords
     m = folium.Map(location=origin_coords, zoom_start=14)
-    folium.Marker(
-        location=origin_coords,
-        popup=f"Origen: {origin_name}",
-        icon=folium.Icon(color="green", icon="play")
-    ).add_to(m)
-    folium.Marker(
-        location=dest_coords,
-        popup=f"Destino: {dest_name}",
-        icon=folium.Icon(color="red", icon="stop")
-    ).add_to(m)
-    folium.PolyLine(
-        locations=[origin_coords, dest_coords],
-        color="blue", weight=4, opacity=0.7
-    ).add_to(m)
+    folium.Marker(origin_coords, popup=f"Origen: {origin_name}", icon=folium.Icon(color="green", icon="play")).add_to(m)
+    folium.Marker(dest_coords, popup=f"Destino: {dest_name}", icon=folium.Icon(color="red", icon="stop")).add_to(m)
+    folium.PolyLine([origin_coords, dest_coords], color="blue", weight=4, opacity=0.7).add_to(m)
     st.markdown("### 🗺️ Mapa de la última ruta")
-    st_folium(m, width=700, height=500, key="route_map")
+    st_folium(m, width=700, height=500, key="route_map", use_container_width=True)
 
-# ── Input y consultas rápidas ─────────────────────────────────
+# ── Input y consultas rápidas (botones simétricos) ────────────
 
 st.divider()
 st.caption("Consultas rápidas:")
+
+# Usamos st.columns(5) - ahora con CSS los botones tendrán el mismo ancho
 cols = st.columns(5)
 quick = [
     "¿Qué visitar en Tarija?",
@@ -238,7 +363,7 @@ for i, (col, text) in enumerate(zip(cols, quick)):
 with st.form("chat_form", clear_on_submit=True):
     user_input = st.text_input(
         "Escribe tu consulta:",
-        placeholder="Ej: ¿Qué lugares puedo visitar con 50 bolivianos?",
+        placeholder="Ej: What places can I visit in Tarija?",
         label_visibility="collapsed"
     )
     submitted = st.form_submit_button("Enviar ➤", use_container_width=True, type="primary")
@@ -246,7 +371,7 @@ with st.form("chat_form", clear_on_submit=True):
 if submitted and user_input.strip():
     st.session_state.pending_query = user_input.strip()
 
-# ── Procesamiento de la consulta con animación en el contenedor ──
+# ── Procesamiento de la consulta (sin cambios) ────────────────
 
 if st.session_state.pending_query and not st.session_state.processing:
     st.session_state.processing = True
@@ -257,19 +382,20 @@ if st.session_state.processing:
     query = st.session_state.pending_query
     st.session_state.pending_query = None
 
-    # Mostrar burbuja animada en el contenedor (ubicado justo después del historial)
+    if query is None or not isinstance(query, str) or query.strip() == "":
+        st.session_state.processing = False
+        st.rerun()
+
     typing_container.markdown(
         '<div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>',
         unsafe_allow_html=True
     )
-    time.sleep(1.2)  # duración de la animación
-    typing_container.empty()
 
-    # Detectar si es consulta de ruta
     route_keywords = ["cómo llegar", "ruta a", "distancia", "ir de", "hasta", "desde", "hacia", "llegar a"]
     is_route = any(kw in query.lower() for kw in route_keywords)
 
     t0 = time.time()
+    detected_lang = 'es'
 
     if is_route:
         route, answer = integrate_routing_agent(query)
@@ -296,27 +422,35 @@ if st.session_state.processing:
                 "alerts": route["warnings"],
                 "sources": []
             }
+        source = "routing_agent"
     else:
-        # No es ruta → limpiar mapa anterior
-        st.session_state.route_coords = None
-        result = rag.ask(
-            query=query,
-            hora=hora,
-            presupuesto_bob=float(presupuesto) if presupuesto > 0 else None,
-            tiempo_disponible_min=int(tiempo_min) if tiempo_min > 0 else None,
-            extranjero=extranjero,
-        )
+        context_results = rag.engine.search(query, top_k=5)
+        user_context = {
+            "hora": hora,
+            "presupuesto": float(presupuesto) if presupuesto > 0 else None,
+            "tiempo_min": int(tiempo_min) if tiempo_min > 0 else None,
+            "extranjero": extranjero,
+        }
+        answer, source, detected_lang = generate_response_with_fallback(query, context_results, user_context)
+        intent = rag.engine.classify_intent(query)
+        result = {
+            "answer": answer,
+            "intent": intent,
+            "confidence": 0.9 if source == "gemini" else 0.6 if source == "rag" else 0.3,
+            "n_chunks_retrieved": len(context_results),
+            "alerts": [],
+            "sources": [f"Generado por {source}"]
+        }
         safety = SafetyAgent()
         alerts_safety = safety.check_zone(query, hora=hora)
         result["alerts"].extend(alerts_safety)
+        st.session_state.route_coords = None
 
     elapsed = round((time.time() - t0) * 1000, 1)
 
-    # Actualizar métricas
     st.session_state.total_queries += 1
     st.session_state.avg_confidence.append(result["confidence"])
 
-    # Agregar respuesta al historial
     st.session_state.messages.append({
         "role": "assistant",
         "content": result["answer"],
@@ -327,9 +461,11 @@ if st.session_state.processing:
             "elapsed_ms": elapsed,
             "alerts": result["alerts"],
             "sources": result.get("sources", []),
+            "source": source if not is_route else "routing_agent",
+            "language": detected_lang
         }
     })
 
-    # Finalizar procesamiento
+    typing_container.empty()
     st.session_state.processing = False
     st.rerun()
