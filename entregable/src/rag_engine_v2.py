@@ -26,6 +26,10 @@ class AdvancedRAGEngine:
         self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
             model_name="paraphrase-multilingual-MiniLM-L12-v2"
         )
+        self.collection = self.chroma_client.get_or_create_collection(
+            name=collection_name,
+            embedding_function=self.embedding_fn
+        )
 
     def _chunk_text(self, text: str, filename: str, max_chars: int = 800) -> List[Dict]:
         """Divide el texto en fragmentos de aproximadamente max_chars palabras."""
