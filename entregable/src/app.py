@@ -255,9 +255,9 @@ if "pending_query" not in st.session_state:
 with st.sidebar:
     col1, col2 = st.columns(2)
     with col1:
-        st.image("entregable\assets\bandera_bolivia.png", width=60)
+        st.image("entregable/assets/bandera_bolivia.png", width=60)
     with col2:
-        st.image("entregable\assets\bandera_tarija.png", width=60)
+        st.image("entregable/assets/bandera_tarija.png", width=60)
     st.title("🏔️ Asistente Turístico")
     st.caption("Tarija, Bolivia — IA Híbrida (Gemini + RAG) + Multilingüe")
 

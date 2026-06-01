@@ -1,5 +1,5 @@
 from pathlib import Path
-from .rag_engine_v2 import AdvancedRAGEngine
+from rag_engine_v2 import AdvancedRAGEngine
 
 class TurismoRAG_v2:
     """
